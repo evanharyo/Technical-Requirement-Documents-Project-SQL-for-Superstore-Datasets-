@@ -1,0 +1,141 @@
+#Current and Detail Order Data
+SELECT o.order_id, o.order_date, EXTRACT(year FROM o.order_date) as tahun, EXTRACT(Quarter FROM o.order_date) as perempat_tahun, EXTRACT(month FROM o.order_date) as bulan, EXTRACT(Day FROM o.order_date) as hari, o.order_customerid, c.customer_name, o.order_productid, p.product_name, o.order_sales, o.order_quantity, o.order_profit
+FROM `Gold_Challenge.Orders` as o
+JOIN `Gold_Challenge.Customers` as c
+ON o.order_customerid=c.customer_id 
+JOIN `Gold_Challenge.Products` as p
+ON o.order_productid = p.product_id
+WHERE o.order_id is not null
+
+
+#Query Daily Reporting
+SELECT EXTRACT(Year FROM o.order_date)AS tahun_penjualan, EXTRACT(Quarter FROM o.order_date)AS quarter_penjualan, EXTRACT(Month FROM o.order_date)AS bulan_penjualan,EXTRACT(Day FROM o.order_date)AS hari_penjualan,  sum(o.order_quantity)AS Banyak_Produk_Terjual, round(sum(o.order_sales),2) AS Sales_Cabang, round(sum(o.order_profit),2) AS Keuntungan_Cabang
+FROM `Gold_Challenge.Orders`as o
+WHERE o.order_id is not null
+GROUP BY rollup(1,2,3,4)
+ORDER BY 1,2,3,4
+
+
+#Query Actual VS Target
+###peryear
+with a as (SELECT year, null as quarter, null as month, sales, lag(sales) over(partition by 1 ORDER BY year)*1.1 AS target 
+FROM (SELECT EXTRACT(year FROM o.order_date) AS year, sum(o.order_sales) AS sales FROM `Gold_Challenge.Orders` AS o
+GROUP BY rollup(1))
+WHERE year is not null
+ORDER BY 1),
+###permonth
+b as (SELECT year, quarter,month,sales, lag(sales) over(partition by 1 ORDER BY year, quarter, month)*1.1 AS target 
+FROM (SELECT EXTRACT(year FROM o.order_date) AS year, EXTRACT(Quarter FROM o.order_date) AS Quarter, EXTRACT(month FROM o.order_date) AS Month, sum(o.order_sales) AS sales FROM `Gold_Challenge.Orders` AS o
+GROUP BY 1,2,3)
+WHERE year is not null
+ORDER BY 1,2,3),
+###perquarter
+c as (SELECT year, quarter, null as month,sales, lag(sales) over(partition by 1 ORDER BY year, quarter)*1.1 AS target 
+FROM (SELECT EXTRACT(year FROM o.order_date) AS year, EXTRACT(Quarter FROM o.order_date) AS Quarter,sum(o.order_sales) AS sales FROM `Gold_Challenge.Orders` AS o
+GROUP BY 1,2)
+WHERE year is not null
+ORDER BY 1,2)
+select * from a
+union all
+select * from c
+union all
+select * from b
+order by year, quarter, month
+
+
+#Query Growth Percentage
+#GROWTH %
+###peryear
+WITH year AS (WITH a AS (SELECT year, null as quarter, null as month,sales, lag(sales) over(partition by 1 ORDER BY year) AS sales_periode_sebelumnya,
+FROM (SELECT EXTRACT(year FROM o.order_date) AS year, sum(o.order_sales) AS sales FROM `Gold_Challenge.Orders` AS o
+GROUP BY rollup(1))
+WHERE year is not null
+ORDER BY 1)
+SELECT year, quarter, month, sales, sales_periode_sebelumnya, ((sales - sales_periode_sebelumnya )/sales_periode_sebelumnya)*100 as growth_percentage
+FROM a),
+###permonth
+month AS (WITH b AS (SELECT year, quarter,month,sales, lag(sales) over(partition by 1 ORDER BY year, quarter, month) AS sales_periode_sebelumnya 
+FROM (SELECT EXTRACT(year FROM o.order_date) AS year, EXTRACT(Quarter FROM o.order_date) AS Quarter, EXTRACT(month FROM o.order_date) AS Month, sum(o.order_sales) AS sales FROM `Gold_Challenge.Orders` AS o
+GROUP BY 1,2,3)
+WHERE year is not null
+ORDER BY 1,2,3)
+SELECT year, quarter, month, sales, sales_periode_sebelumnya, ((sales - sales_periode_sebelumnya )/sales_periode_sebelumnya)*100 as growth_percentage
+FROM b),
+###perquarter
+quarter AS(WITH c AS (SELECT year, quarter,null as month,sales, lag(sales) over(partition by 1 ORDER BY year, quarter) AS sales_periode_sebelumnya
+FROM (SELECT EXTRACT(year FROM o.order_date) AS year, EXTRACT(Quarter FROM o.order_date) AS Quarter,sum(o.order_sales) AS sales FROM `Gold_Challenge.Orders` AS o
+GROUP BY 1,2)
+WHERE year is not null
+ORDER BY 1,2)
+SELECT year, quarter, month, sales, sales_periode_sebelumnya, ((sales - sales_periode_sebelumnya )/sales_periode_sebelumnya)*100 as growth_percentage
+FROM c)
+select * from year
+union all
+select * from quarter
+union all
+select * from month
+order by year, quarter, month
+
+
+#Query Loss Reporting Office
+SELECT EXTRACT(year FROM o.order_date) AS year, EXTRACT(Quarter FROM o.order_date) AS Quarter, EXTRACT(month FROM o.order_date) AS Month, round(sum(o.order_profit),2) as Jumlah_Profit,
+  CASE WHEN round(sum(o.order_profit),2)<0 THEN 'Rugi'
+  ELSE 'Untung'
+  END AS kat_loss_report
+FROM `Gold_Challenge.Orders` AS o
+WHERE o.order_id is not null
+GROUP BY rollup(1,2,3)
+ORDER BY 1,2,3
+
+
+#Query Loss Reporting Product
+SELECT p.product_name, EXTRACT(Year FROM o.order_date)AS tahun_penjualan, EXTRACT(Quarter FROM o.order_date)AS quarter_penjualan, EXTRACT(Month FROM o.order_date)AS bulan_penjualan,  round(sum(o.order_profit),2) as Jumlah_Profit,
+CASE WHEN round(sum(o.order_profit),2)<0 THEN 'Rugi'
+  ELSE 'Untung'
+  END AS kat_loss_report
+FROM `Gold_Challenge.Orders`as o
+JOIN `bie-6-week-2.Gold_Challenge.Products` AS p 
+ON o.order_productid = p.product_id
+WHERE o.order_id is not null
+GROUP BY rollup (1,2,3,4)
+ORDER BY 1,2,3,4
+
+
+#Query Product Segmentation permonth
+#penggolongan produk perbulanSELECT p.product_name,EXTRACT(Year FROM o.order_date)AS tahun_penjualan, EXTRACT(Month FROM o.order_date)AS bulan_penjualan, sum(o.order_quantity) AS total_produk_terjual,
+CASE WHEN sum(o.order_quantity) < 5 THEN '3rd Product'
+  WHEN sum(o.order_quantity) BETWEEN 5 AND 10 THEN '2nd Product'
+  WHEN sum(o.order_quantity) > 10 THEN '1st Product'
+  END AS kat_prod
+FROM `bie-6-week-2.Gold_Challenge.Orders` AS o
+JOIN `bie-6-week-2.Gold_Challenge.Products` AS p 
+ON o.order_productid = p.product_id
+WHERE o.order_id is not null
+GROUP BY rollup (1, 2,3)
+ORDER BY 1,2,3
+
+
+#Query Customer Segmentation
+SELECT c.customer_name, EXTRACT(Year FROM o.order_date)AS tahun, EXTRACT(Quarter FROM o.order_date)AS quarter, sum(o.order_sales) AS jumlah_belanja, 
+CASE WHEN sum(o.order_sales) < 200 THEN 'Bronze'
+  WHEN sum(o.order_sales) BETWEEN 200 AND 500 THEN 'Silver'
+  WHEN sum(o.order_sales) > 500 THEN 'Gold'
+  END AS kat_cust
+FROM `bie-6-week-2.Gold_Challenge.Orders` AS o
+JOIN `bie-6-week-2.Gold_Challenge.Customers` AS c
+ON o.order_customerid=c.customer_id
+WHERE o.order_id is not null
+GROUP BY rollup(1,2,3)
+ORDER BY 1,2,3
+
+
+#Query Office Segmentation
+SELECT o.order_city,EXTRACT(Year FROM o.order_date)AS tahun_penjualan,EXTRACT(Month FROM o.order_date)AS bulan_penjualan, sum(o.order_sales)AS Omzet_Cabang, 
+  CASE WHEN sum(o.order_sales) < 1000 THEN 'Kategori I'
+  WHEN sum(o.order_sales) BETWEEN 1000 AND 2000 THEN 'Kategori II'
+  WHEN sum(o.order_sales) > 2000 THEN 'Kategori III'
+  END AS kat_omzet_cabang
+FROM `Gold_Challenge.Orders`as o
+WHERE o.order_id is not null
+GROUP BY rollup(1,2,3)
+ORDER BY 1,2,3
